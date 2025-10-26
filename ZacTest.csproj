@@ -11,6 +11,11 @@
     <PackageReference Include="Scalar.AspNetCore" Version="2.9.0" />
   </ItemGroup>
   <ItemGroup>
+    <None Update="Sql\**\*.sql">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
     <EmbeddedResource Include="Sql\**\*.sql" />
   </ItemGroup>
 </Project>
