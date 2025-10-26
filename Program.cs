@@ -3,6 +3,7 @@ using ZacTest.src;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Add services to the container.
 builder.Services.AddSingleton<IDataSourceFactory, DataSourceFactory>();
 builder.Services.AddSingleton(provider =>
 {
@@ -11,12 +12,16 @@ builder.Services.AddSingleton(provider =>
 });
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 
+// Add API Controllers
 builder.Services.AddControllers();
+
+// Add Problem Details middleware
 builder.Services.AddProblemDetails();
 
 // Use the built-in OpenAPI doc generator
 builder.Services.AddOpenApi();
 
+// Add Scalar API Reference middleware
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -40,6 +45,7 @@ app.UseRouting();
 
 // app.UseAuthorization();
 
+// Map (Route) API controllers
 app.MapControllers();
 
 app.Run();
