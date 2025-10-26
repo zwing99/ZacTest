@@ -12,6 +12,16 @@ builder.Services.AddSingleton(provider =>
 });
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 
+// Configure SQL text provider
+builder.Services.Configure<SqlTextOptions>(o =>
+{
+    o.Root = "Sql";
+    o.PreferFileSystem = builder.Environment.IsDevelopment(); // hot-reload in dev
+    o.ResourceAssembly = typeof(Program).Assembly;
+    o.ResourceRootNamespace = typeof(Program).Assembly.GetName().Name + ".Sql"; // if embedded
+});
+builder.Services.AddSingleton<ISqlTextProvider, SqlTextProvider>();
+
 // Add API Controllers
 builder.Services.AddControllers();
 
