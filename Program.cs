@@ -1,5 +1,6 @@
 using Scalar.AspNetCore; // make sure to import the namespace
 using ZacTest.src;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,14 +14,27 @@ builder.Services.AddSingleton(provider =>
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 
 // Configure SQL text provider
-builder.Services.Configure<SqlTextOptions>(o =>
+builder.Services.AddSingleton<IOptions<SqlTextOptions>>(sp =>
 {
-    o.Root = "Sql";
-    o.PreferFileSystem = builder.Environment.IsDevelopment(); // hot-reload in dev
-    o.ResourceAssembly = typeof(Program).Assembly;
-    o.ResourceRootNamespace = typeof(Program).Assembly.GetName().Name + ".Sql"; // if embedded
+    var env = sp.GetRequiredService<IHostEnvironment>();
+    var asm = typeof(Program).Assembly;
+
+    var options = new SqlTextOptions(
+        Root: "Sql",
+        PreferFileSystem: env.IsDevelopment(),
+        ResourceAssembly: asm,
+        ResourceRootNamespace: $"{asm.GetName().Name}.Sql"
+    );
+
+    return Options.Create(options);
 });
-builder.Services.AddSingleton<ISqlTextProvider, SqlTextProvider>();
+builder.Services.AddSingleton<ISqlTextProvider>(sp =>
+    SqlTextProvider.Create(
+        sp.GetRequiredService<IHostEnvironment>(),
+        sp.GetRequiredService<IOptions<SqlTextOptions>>(),
+        sp.GetRequiredService<ILogger<SqlTextProvider>>()
+    )
+);
 
 // Add API Controllers
 builder.Services.AddControllers();

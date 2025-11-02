@@ -7,31 +7,41 @@ using Microsoft.Extensions.Primitives;
 
 namespace ZacTest.src;
 
-public sealed class SqlTextOptions
+public sealed record SqlTextOptions(
+    string Root = "Sql",
+    bool PreferFileSystem = true,
+    Assembly? ResourceAssembly = null,
+    string? ResourceRootNamespace = null
+)
 {
-    public string Root = "Sql"; // folder under content root or output dir
-    public bool PreferFileSystem = true; // dev: true, prod: false if you embed
-    public Assembly? ResourceAssembly { get; set; } // for embedded mode
-    public string? ResourceRootNamespace { get; set; } // e.g., "MyApp.Sql"
+    // Parameterless constructor for DI
+    public SqlTextOptions()
+        : this("Sql", true, null, null) { }
 }
 
 public sealed class SqlTextProvider : ISqlTextProvider, IDisposable
 {
-    private readonly IFileProvider _files; // composite
+    // Required init-only properties
+    public required IFileProvider FileProvider { get; init; }
+    public required Assembly? ResourceAssembly { get; init; }
+    public required string? ResourceRootNamespace { get; init; }
+    public required ILogger<SqlTextProvider>? Logger { get; init; }
+
     private readonly ConcurrentDictionary<string, string> _cache = new();
     private readonly List<IDisposable> _registrations = new();
-    private readonly Assembly? _asm;
-    private readonly string? _ns;
 
-    public SqlTextProvider(
+    /// <summary>
+    /// Factory method to create and configure SqlTextProvider from DI.
+    /// </summary>
+    public static SqlTextProvider Create(
         IHostEnvironment env,
         IOptions<SqlTextOptions> options,
         ILogger<SqlTextProvider> log
     )
     {
         var o = options.Value;
-        _asm = o.ResourceAssembly ?? Assembly.GetEntryAssembly();
-        _ns = o.ResourceRootNamespace;
+        var asm = o.ResourceAssembly ?? Assembly.GetEntryAssembly();
+        var ns = o.ResourceRootNamespace;
 
         // Candidate roots
         var devPath = Path.Combine(env.ContentRootPath, o.Root ?? "Sql");
@@ -53,21 +63,9 @@ public sealed class SqlTextProvider : ISqlTextProvider, IDisposable
             : new NullFileProvider();
 
         // Preferred order: dev first if requested, else output first
-        _files = o.PreferFileSystem
+        var compositeProvider = o.PreferFileSystem
             ? new CompositeFileProvider(devProvider, outProvider)
             : new CompositeFileProvider(outProvider, devProvider);
-
-        // Watch if any real provider exists (NullFileProvider returns a noop token)
-        _registrations.Add(
-            ChangeToken.OnChange(
-                () => _files.Watch("**/*.sql"),
-                () =>
-                {
-                    _cache.Clear();
-                    log.LogInformation("SQL text cache invalidated due to file change.");
-                }
-            )
-        );
 
         // Friendly diagnostics
         if (devProvider is NullFileProvider && outProvider is NullFileProvider)
@@ -79,6 +77,31 @@ public sealed class SqlTextProvider : ISqlTextProvider, IDisposable
                 outPath
             );
         }
+
+        return new SqlTextProvider
+        {
+            FileProvider = compositeProvider,
+            ResourceAssembly = asm,
+            ResourceRootNamespace = ns,
+            Logger = log,
+        }._Initialize();
+    }
+
+    private SqlTextProvider _Initialize()
+    {
+        // Watch if any real provider exists (NullFileProvider returns a noop token)
+        _registrations.Add(
+            ChangeToken.OnChange(
+                () => FileProvider.Watch("**/*.sql"),
+                () =>
+                {
+                    _cache.Clear();
+                    Logger?.LogInformation("SQL text cache invalidated due to file change.");
+                }
+            )
+        );
+
+        return this;
     }
 
     public string Get(string key)
@@ -88,17 +111,18 @@ public sealed class SqlTextProvider : ISqlTextProvider, IDisposable
             normalized,
             k =>
             {
-                var file = _files.GetFileInfo($"{k}.sql");
+                var file = FileProvider.GetFileInfo($"{k}.sql");
                 if (file.Exists && file.PhysicalPath is not null)
                     return File.ReadAllText(file.PhysicalPath);
 
                 // Fallback: embedded resource
-                if (_asm != null)
+                if (ResourceAssembly != null)
                 {
                     var resName =
-                        _ns != null
-                            ? $"{_ns}.{k.Replace('/', '.')}.sql"
-                            : _asm.GetManifestResourceNames()
+                        ResourceRootNamespace != null
+                            ? $"{ResourceRootNamespace}.{k.Replace('/', '.')}.sql"
+                            : ResourceAssembly
+                                .GetManifestResourceNames()
                                 .FirstOrDefault(n =>
                                     n.EndsWith(
                                         $"{k.Replace('/', '.')}.sql",
@@ -109,7 +133,7 @@ public sealed class SqlTextProvider : ISqlTextProvider, IDisposable
                     if (resName != null)
                     {
                         using var s =
-                            _asm.GetManifestResourceStream(resName)
+                            ResourceAssembly.GetManifestResourceStream(resName)
                             ?? throw new FileNotFoundException(
                                 $"Embedded SQL not found: {resName}"
                             );
